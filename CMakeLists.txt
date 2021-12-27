@@ -75,6 +75,7 @@ find_package(
    Qt5
    COMPONENTS
    Core
+   Gui
    Widgets)
 find_package(
    Threads)
@@ -84,5 +85,6 @@ target_link_libraries(
    PRIVATE
    pcap::pcap
    Qt5::Core
+   Qt5::Gui
    Qt5::Widgets
    Threads::Threads)

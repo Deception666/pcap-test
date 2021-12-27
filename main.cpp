@@ -11,13 +11,20 @@
 
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTreeView>
+#include <QtWidgets/QSplitter>
+#include <QtWidgets/QPlainTextEdit>
 
+#include <QtGui/QFont>
+
+#include <QtCore/QItemSelectionModel>
+#include <QtCore/QItemSelection>
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QVariant>
 #include <QtCore/QString>
 #include <QtCore/QObject>
 #include <QtCore/QMetaType>
 #include <QtCore/QDebug>
+#include <QtCore/QTextStream>
 
 #include <Qt>
 
@@ -97,6 +104,33 @@ static constexpr uint16_t FRAGMENT_FLAG_MORE_FRAGMENTS { 0x2000 };
 
 } // namespace network
 
+namespace transport
+{
+
+struct tcp
+{
+   uint16_t src_port;
+   uint16_t dst_port;
+   uint32_t sequence;
+   uint32_t acknowledgement;
+   uint8_t reserved1 : 4;
+   uint8_t header_length : 4;
+   uint8_t terminate_bit : 1;
+   uint8_t synchronize_bit : 1;
+   uint8_t reset_bit : 1;
+   uint8_t push_bit : 1;
+   uint8_t acknowledgement_bit : 1;
+   uint8_t urgent_bit : 1;
+   uint8_t reserved2 : 2;
+   uint16_t window_size;
+   uint16_t checksum;
+   uint16_t urgent_pointer;
+   // options are 0 - 40 bytes
+   // tcp data follows the options
+};
+
+} // namespace transport
+
 } // namespace osi
 
 using PacketData =
@@ -105,7 +139,8 @@ using PacketData =
       size_t, /* length of packet */
       std::unique_ptr< const char [] >, /* packet data */
       const osi::data_link::ethernet * const, /* ethernet header */
-      const osi::network::ipv4 * const /* ip header */
+      const osi::network::ipv4 * const, /* ip header */
+      const void * const /* ip payload */
    >;
 
 using Packets =
@@ -310,6 +345,13 @@ uint32_t CalculateFragmentOffset(
       offset * 8;
 }
 
+size_t CalculateIPHeaderSize(
+   const uint8_t ip_header_size )
+{
+   return
+      ip_header_size * sizeof(uint32_t);
+}
+
 std::string FormatIPAddress(
    const uint8_t (&address)[4] )
 {
@@ -336,22 +378,6 @@ std::string FormatIPAddress(
       saddress;
 }
 
-// a utility function to pull x number of bytes
-// out of the packet data
-std::string GetPacketData(
-   const size_t number_of_bytes,
-   const uint8_t * const packet_data )
-{
-   std::string data;
-
-   if (packet_data)
-   {
-      // change this function to actually get the data now
-   }
-
-   return data;
-}
-
 // a utility function to continually capture
 // data from the capture source
 std::vector< PacketData > CapturePackets(
@@ -371,37 +397,39 @@ std::vector< PacketData > CapturePackets(
             auto & packets =
                *reinterpret_cast< std::vector< PacketData > * >(
                   user_data);
-   
+
             const double seconds =
                packet_header->ts.tv_sec +
                std::chrono::duration_cast<
                std::chrono::duration< double, std::ratio< 1, 1 > > >(
                   std::chrono::microseconds{ packet_header->ts.tv_usec }).count();
-   
+
             auto data =
                std::make_unique< char [] >(
                   packet_header->caplen);
-   
+
             std::memcpy(
                data.get(),
                packet_data,
                packet_header->caplen);
-   
+
             const auto ethernet_header =
                reinterpret_cast< const osi::data_link::ethernet * >(
                   data.get());
             const auto ipv4_header =
                reinterpret_cast< const osi::network::ipv4 * >(
                   ethernet_header + 1);
-   
+
             packets.emplace_back(
                seconds,
                packet_header->caplen,
                std::move(data),
                ethernet_header,
                osi::data_link::msb::ETHERNET_TYPE_IPV4 == ethernet_header->type ?
-               ipv4_header :
-               nullptr);
+                  ipv4_header :
+                  nullptr,
+               reinterpret_cast< const uint8_t * >(ipv4_header) +
+               CalculateIPHeaderSize(ipv4_header->header_length));
          };
 
       const auto dispatch_result =
@@ -916,7 +944,15 @@ PCAPItemModel::~PCAPItemModel( )
 int32_t PCAPItemModel::columnCount(
    const QModelIndex & parent ) const
 {
-   return 14;
+   int32_t count { };
+   
+   if (!parent.isValid())
+   {
+      count = 14;
+   }
+
+   return
+      count;
 }
 
 int32_t PCAPItemModel::rowCount(
@@ -1127,7 +1163,8 @@ QVariant PCAPItemModel::data(
             {
                value =
                   QString::number(
-                     ipv4_header->header_length * sizeof(uint32_t));
+                     CalculateIPHeaderSize(
+                        ipv4_header->header_length));
             }
          }
 
@@ -1157,7 +1194,7 @@ QVariant PCAPItemModel::data(
             {
                value =
                   QString::number(
-                     ipv4_header->fragment_id);
+                     ntohs(ipv4_header->fragment_id));
             }
          }
 
@@ -1262,11 +1299,272 @@ QModelIndex PCAPItemModel::index(
          createIndex(
             row,
             column,
-            nullptr);
+            const_cast< PacketData * >(
+               &packets_[row]));
    }
 
    return
       index;
+}
+
+size_t CalculateTCPHeaderSize(
+   const uint8_t tcp_header_size )
+{
+   return
+      tcp_header_size * sizeof(uint32_t);
+}
+
+void FormatDataBlocks(
+   const uint8_t * begin,
+   const uint8_t * const end,
+   QTextStream & stream )
+{
+   const std::ptrdiff_t BYTES_PER_LINE { 16 };
+   const std::ptrdiff_t EXTRA_SPACE_AT_BYTES { 8 };
+
+   const auto orig_number_flags =
+      stream.numberFlags();
+   const auto orig_field_width =
+      stream.fieldWidth();
+   const auto orig_pad_char =
+      stream.padChar();
+
+   stream.setNumberFlags(
+      QTextStream::UppercaseDigits);
+   stream.setPadChar('0');
+
+   while (begin < end)
+   {
+      const auto distance =
+         end - begin;
+      const auto stride =
+         distance > BYTES_PER_LINE ?
+         BYTES_PER_LINE :
+         distance;
+
+      stream.setIntegerBase(16);
+
+      for (std::ptrdiff_t i { }; i < stride; ++i)
+      {
+         if (i && i % EXTRA_SPACE_AT_BYTES == 0)
+         {
+            stream
+               << qSetFieldWidth(0)
+               << " ";
+         }
+
+         stream
+            << qSetFieldWidth(2)
+            << *(begin + i)
+            << qSetFieldWidth(0)
+            << " ";
+      }
+
+      if (BYTES_PER_LINE > stride)
+      {
+         const auto gap =
+            BYTES_PER_LINE - stride;
+
+         for (std::ptrdiff_t i { }; gap > i; ++i)
+         {
+            stream << "   ";
+         }
+
+         const auto extra_spaces =
+            gap / EXTRA_SPACE_AT_BYTES;
+
+         for (std::ptrdiff_t i { }; extra_spaces > i; ++i)
+         {
+            stream << " ";
+         }
+      }
+
+      stream << "     ";
+
+      stream.setIntegerBase(10);
+
+      for (std::ptrdiff_t i { }; i < stride; ++i)
+      {
+         if (i && i % EXTRA_SPACE_AT_BYTES == 0)
+         {
+            stream << " ";
+         }
+
+         const auto value =
+            *(begin + i);
+
+         if (0 <= value && value <= 31 || value >= 127)
+         {
+            stream << ".";
+         }
+         else
+         {
+            stream
+               << static_cast< char >(value);
+         }
+
+         stream << " ";
+      }
+
+      stream << "\n";
+
+      begin += stride;
+   }
+
+   stream.setNumberFlags(
+      orig_number_flags);
+   stream.setFieldWidth(
+      orig_field_width);
+   stream.setPadChar(
+      orig_pad_char);
+}
+
+QString FormatTCPHeader(
+   const PacketData & packet )
+{
+   QString header;
+
+   const auto tcp_header =
+      reinterpret_cast< const osi::transport::tcp * >(
+         std::get< 5 >(packet));
+
+   if (tcp_header)
+   {
+      QTextStream stream {
+         &header };
+
+      const auto tcp_header_size =
+         CalculateTCPHeaderSize(
+            tcp_header->header_length);
+
+      stream
+         << "-- TCP Header --\n"
+         << "        Source Port: " << ntohs(tcp_header->src_port) << "\n"
+         << "   Destination Port: " << ntohs(tcp_header->dst_port) << "\n"
+         << "         Sequence #: " << ntohl(tcp_header->sequence) << "\n"
+         << "  Acknowledgement #: " << ntohl(tcp_header->acknowledgement) << "\n"
+         << "        Header Size: " << tcp_header_size << "\n";
+
+      stream.setIntegerBase(16);
+      stream.setNumberFlags(
+         QTextStream::ShowBase |
+         QTextStream::UppercaseDigits |
+         stream.numberFlags());
+
+      stream
+         << "           Reserved: " << (tcp_header->reserved1 | tcp_header->reserved2 << 4) << "\n";
+
+      stream.setIntegerBase(10);
+
+      stream
+         << "         Urgent Bit: " << tcp_header->urgent_bit << "\n"
+         << "Acknowledgement Bit: " << tcp_header->acknowledgement_bit << "\n"
+         << "           Push Bit: " << tcp_header->push_bit << "\n"
+         << "          Reset Bit: " << tcp_header->reset_bit << "\n"
+         << "    Synchronize Bit: " << tcp_header->synchronize_bit << "\n"
+         << "      Terminate Bit: " << tcp_header->terminate_bit << "\n"
+         << "        Window Size: " << ntohs(tcp_header->window_size) << "\n";
+
+      stream.setIntegerBase(16);
+
+      stream
+         << "           Checksum: " << ntohs(tcp_header->checksum) << "\n";
+
+      stream.setIntegerBase(10);
+
+      stream
+         << "     Urgent Pointer: " << ntohs(tcp_header->urgent_pointer) << "\n";
+
+      if (tcp_header_size > 20)
+      {
+         stream
+            << "\n-- TCP Options --\n";
+
+         const auto tcp_options =
+            reinterpret_cast< const uint8_t * >(
+               tcp_header + 1);
+
+         FormatDataBlocks(
+            tcp_options,
+            tcp_options + tcp_header_size - 20,
+            stream);
+      }
+
+      const auto ipv4_header =
+         std::get< 4 >(packet);
+
+      if (ipv4_header)
+      {
+         const auto tcp_data_begin =
+            reinterpret_cast< const uint8_t * >(
+               tcp_header) + tcp_header_size;
+         const auto tcp_data_end =
+            reinterpret_cast< const uint8_t * >(
+               ipv4_header) + ntohs(ipv4_header->total_length);
+
+         if (tcp_data_end > tcp_data_begin)
+         {
+            stream
+               << "\n-- TCP Data --\n";
+
+            FormatDataBlocks(
+               tcp_data_begin,
+               tcp_data_end,
+               stream);
+         }
+      }
+   }
+
+   return
+      header;
+}
+
+QString FormatProtocolHeader(
+   const PacketData & packet )
+{
+   QString header { "Protocol Undefined" };
+
+   const auto ipv4_header =
+      std::get< 4 >(packet);
+
+   if (ipv4_header)
+   {
+      switch (ipv4_header->protocol)
+      {
+      case osi::network::PROTOCOL_TCP:
+         header =
+           FormatTCPHeader(
+              packet);
+         break;
+      case osi::network::PROTOCOL_UDP:
+         break;
+      case osi::network::PROTOCOL_ICMP:
+         break;
+      }
+   }
+
+   return
+      header;
+}
+
+QString FormatSelection(
+   const QModelIndex & index )
+{
+   QString formatted;
+
+   const auto packet =
+      reinterpret_cast< const PacketData * >(
+         index.internalPointer());
+
+   if (packet)
+   {
+      formatted =
+         FormatProtocolHeader(
+            *packet);
+   }
+
+   return
+      formatted;
 }
 
 int32_t main(
@@ -1375,14 +1673,59 @@ int32_t main(
         argv
       };
 
+      QSplitter splitter;
+
       QTreeView tree_view;
 
       tree_view.setModel(
-         new PCAPItemModel {
+         std::make_unique< PCAPItemModel >(
             std::move(capture_device),
-            &tree_view });
+            &tree_view).release());
 
-      tree_view.show();
+      splitter.addWidget(
+         &tree_view);
+
+      QPlainTextEdit text_edit;
+
+      text_edit.setReadOnly(
+         true);
+      text_edit.setLineWrapMode(
+         QPlainTextEdit::NoWrap);
+
+      QFont font_text_edit {
+         "FreeMono",
+         10
+      };
+
+      font_text_edit.setBold(
+         true);
+
+      text_edit.setFont(
+         font_text_edit);
+
+      QObject::connect(
+         tree_view.selectionModel(),
+         &QItemSelectionModel::selectionChanged,
+         [ & ] (
+            const QItemSelection & selected,
+            const QItemSelection & deselected )
+         {
+            const auto indexes =
+               selected.indexes();
+
+            if (!indexes.empty())
+            {
+               text_edit.setPlainText(
+                  FormatSelection(
+                     indexes[0]));
+            }          
+         }
+      );
+
+      splitter.addWidget(
+         &text_edit);
+
+      splitter.show();
 
       const auto exec_results =
          application.exec();
