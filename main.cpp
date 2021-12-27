@@ -129,6 +129,21 @@ struct tcp
    // tcp data follows the options
 };
 
+struct icmp
+{
+   uint8_t type;
+   uint8_t code;
+   uint16_t checksum;
+   // next 32-bits is defined by type and code
+};
+
+struct icmp_echo :
+   public icmp
+{
+   uint16_t id;
+   uint16_t sequence;
+};
+
 } // namespace transport
 
 } // namespace osi
@@ -1419,7 +1434,7 @@ void FormatDataBlocks(
       orig_pad_char);
 }
 
-QString FormatTCPHeader(
+QString FormatTCPPacket(
    const PacketData & packet )
 {
    QString header;
@@ -1519,7 +1534,76 @@ QString FormatTCPHeader(
       header;
 }
 
-QString FormatProtocolHeader(
+QString FormatICMPPacket(
+   const PacketData & packet )
+{
+   QString header;
+
+   const auto icmp_header =
+      reinterpret_cast< const osi::transport::icmp * >(
+         std::get< 5 >(packet));
+
+   if (icmp_header)
+   {
+      QTextStream stream {
+         &header };
+
+      stream
+         << "-- ICMP Header --\n"
+         << "    Type: " << icmp_header->type << "\n"
+         << "    Code: " << icmp_header->code << "\n"
+         << "Checksum: " << ntohs(icmp_header->checksum) << "\n";
+
+      if (icmp_header->type == 0 || icmp_header->type == 8)
+      {
+         stream
+            << "\n-- ICMP Echo "
+            << (icmp_header->type == 0 ? "Reply --\n" : "Request --\n");
+
+         const auto icmp_echo_header =
+            reinterpret_cast< const osi::transport::icmp_echo * >(
+               icmp_header);
+
+         stream
+            << "      ID: " << ntohs(icmp_echo_header->id) << "\n"
+            << "Sequence: " << ntohs(icmp_echo_header->sequence) << "\n";
+      }
+
+      const auto ipv4_header =
+         std::get< 4 >(packet);
+
+      if (ipv4_header)
+      {
+         const auto header_size =
+            icmp_header->type == 0 || icmp_header->type == 8 ?
+               sizeof(osi::transport::icmp_echo) :
+               sizeof(osi::transport::icmp);
+
+         const auto icmp_data_begin =
+            reinterpret_cast< const uint8_t * >(
+               icmp_header) + header_size;
+         const auto icmp_data_end =
+            reinterpret_cast< const uint8_t * >(
+               ipv4_header) + ntohs(ipv4_header->total_length);
+
+         if (icmp_data_end > icmp_data_begin)
+         {
+            stream
+               << "\n-- ICMP Data --\n";
+
+            FormatDataBlocks(
+               icmp_data_begin,
+               icmp_data_end,
+               stream);
+         }
+      }
+   }
+
+   return
+      header;
+}
+
+QString FormatProtocol(
    const PacketData & packet )
 {
    QString header { "Protocol Undefined" };
@@ -1533,12 +1617,15 @@ QString FormatProtocolHeader(
       {
       case osi::network::PROTOCOL_TCP:
          header =
-           FormatTCPHeader(
+           FormatTCPPacket(
               packet);
          break;
       case osi::network::PROTOCOL_UDP:
          break;
       case osi::network::PROTOCOL_ICMP:
+         header =
+            FormatICMPPacket(
+               packet);
          break;
       }
    }
@@ -1559,7 +1646,7 @@ QString FormatSelection(
    if (packet)
    {
       formatted =
-         FormatProtocolHeader(
+         FormatProtocol(
             *packet);
    }
 
