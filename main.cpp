@@ -144,6 +144,14 @@ struct icmp_echo :
    uint16_t sequence;
 };
 
+struct udp
+{
+   uint16_t src_port;
+   uint16_t dst_port;
+   uint16_t total_length;
+   uint16_t checksum;
+};
+
 } // namespace transport
 
 } // namespace osi
@@ -1437,7 +1445,7 @@ void FormatDataBlocks(
 QString FormatTCPPacket(
    const PacketData & packet )
 {
-   QString header;
+   QString spacket;
 
    const auto tcp_header =
       reinterpret_cast< const osi::transport::tcp * >(
@@ -1446,7 +1454,7 @@ QString FormatTCPPacket(
    if (tcp_header)
    {
       QTextStream stream {
-         &header };
+         &spacket };
 
       const auto tcp_header_size =
          CalculateTCPHeaderSize(
@@ -1531,13 +1539,13 @@ QString FormatTCPPacket(
    }
 
    return
-      header;
+      spacket;
 }
 
 QString FormatICMPPacket(
    const PacketData & packet )
 {
-   QString header;
+   QString spacket;
 
    const auto icmp_header =
       reinterpret_cast< const osi::transport::icmp * >(
@@ -1546,7 +1554,7 @@ QString FormatICMPPacket(
    if (icmp_header)
    {
       QTextStream stream {
-         &header };
+         &spacket };
 
       stream
          << "-- ICMP Header --\n"
@@ -1600,13 +1608,60 @@ QString FormatICMPPacket(
    }
 
    return
-      header;
+      spacket;
+}
+
+QString FormatUDPPacket(
+   const PacketData & packet )
+{
+   QString spacket;
+
+   const auto udp_header =
+      reinterpret_cast< const osi::transport::udp * >(
+         std::get< 5 >(packet));
+
+   if (udp_header)
+   {
+      QTextStream stream {
+         &spacket };
+
+      const auto total_udp_size =
+         ntohs(udp_header->total_length);
+
+      stream
+         << "-- UDP Header --\n"
+         << "     Source Port: " << ntohs(udp_header->src_port) << "\n"
+         << "Destination Port: " << ntohs(udp_header->dst_port) << "\n"
+         << "      Total Size: " << total_udp_size << "\n"
+         << "        Checksum: " << ntohs(udp_header->checksum) << "\n";
+
+         const auto udp_data_begin =
+            reinterpret_cast< const uint8_t * >(
+               udp_header + 1);
+         const auto udp_data_end =
+            reinterpret_cast< const uint8_t * >(
+               udp_header) + total_udp_size;
+
+         if (udp_data_end > udp_data_begin)
+         {
+            stream
+               << "\n-- UDP Data --\n";
+
+            FormatDataBlocks(
+               udp_data_begin,
+               udp_data_end,
+               stream);
+         }
+   }
+
+   return
+      spacket;
 }
 
 QString FormatProtocol(
    const PacketData & packet )
 {
-   QString header { "Protocol Undefined" };
+   QString protocol { "Protocol Undefined" };
 
    const auto ipv4_header =
       std::get< 4 >(packet);
@@ -1616,14 +1671,17 @@ QString FormatProtocol(
       switch (ipv4_header->protocol)
       {
       case osi::network::PROTOCOL_TCP:
-         header =
+         protocol =
            FormatTCPPacket(
               packet);
          break;
       case osi::network::PROTOCOL_UDP:
+         protocol =
+            FormatUDPPacket(
+               packet);
          break;
       case osi::network::PROTOCOL_ICMP:
-         header =
+         protocol =
             FormatICMPPacket(
                packet);
          break;
@@ -1631,7 +1689,7 @@ QString FormatProtocol(
    }
 
    return
-      header;
+      protocol;
 }
 
 QString FormatSelection(
