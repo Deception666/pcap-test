@@ -499,8 +499,6 @@ void PCAPFreeAllDevices(
       pcap_freealldevs(
          const_cast< pcap_if_t * >(
             devices));
-
-      delete devices;
    }
 }
 
@@ -538,7 +536,7 @@ PCAPDevices FindAllDevices( )
    else
    {
       all_devices.reset(
-         new pcap_if_t { *devices });
+         devices);
    }
    
    return
