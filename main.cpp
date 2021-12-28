@@ -13,8 +13,12 @@
 #include <QtWidgets/QTreeView>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QPlainTextEdit>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QAction>
 
 #include <QtGui/QFont>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QCursor>
 
 #include <QtCore/QItemSelectionModel>
 #include <QtCore/QItemSelection>
@@ -896,6 +900,9 @@ public:
       int32_t column,
       const QModelIndex & parent ) const override;
 
+public slots:
+   void OnClearCapturedData( );
+
 private:
 signals:
    void NewCapturedPackets(
@@ -1328,6 +1335,21 @@ QModelIndex PCAPItemModel::index(
 
    return
       index;
+}
+
+void PCAPItemModel::OnClearCapturedData( )
+{
+   if (!packets_.empty())
+   {
+      beginRemoveRows(
+         QModelIndex { },
+         0,
+         packets_.size() - 1);
+
+      packets_.clear();
+
+      endRemoveRows();
+   }
 }
 
 size_t CalculateTCPHeaderSize(
@@ -1866,6 +1888,42 @@ int32_t main(
             }          
          }
       );
+
+      QObject::connect(
+         &tree_view,
+         &QTreeView::pressed,
+         [ & ] (
+            const QModelIndex & index )
+         {
+            if (index.isValid() &&
+                QGuiApplication::mouseButtons() & Qt::RightButton)
+            {
+               QMenu menu;
+
+               const auto action =
+                  menu.addAction(
+                     "Clear Packets");
+
+               if (action)
+               {
+                  const auto model =
+                     dynamic_cast< PCAPItemModel * >(
+                        tree_view.model());
+
+                  if (model)
+                  {
+                     QObject::connect(
+                        action,
+                        &QAction::triggered,
+                        model,
+                        &PCAPItemModel::OnClearCapturedData);
+
+                     menu.exec(
+                        QCursor::pos());
+                  }
+               }
+            }
+         });
 
       splitter.addWidget(
          &text_edit);
