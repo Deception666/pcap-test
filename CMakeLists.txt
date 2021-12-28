@@ -22,31 +22,29 @@ set(
 function(
    find_pcap )
 
+   if (WIN32)
+      set(
+         NPCAP_SDK_LIB_PATH
+         "${NPCAP_SDK_ROOT}/lib/${CMAKE_GENERATOR_PLATFORM}")
+   endif ( )
+
    find_path(
       PCAP_ROOT_DIR
       NAMES
-         pcap/pcap.h)
-
-   if (NOT PCAP_ROOT_DIR)
-
-      message(
-         FATAL_ERROR
-         "Unable to find the pcap.h header file!")
-
-   endif ( )
+         pcap/pcap.h
+      PATH_SUFFIXES
+         include
+      HINTS
+         "${NPCAP_SDK_ROOT}"
+      REQUIRED)
 
    find_library(
       PCAP_LIBRARY
       NAMES
-         pcap)
-
-   if (NOT PCAP_LIBRARY)
-
-      message(
-         FATAL_ERROR
-         "Unable to find the pcap library!")
-
-   endif ( )
+         pcap wpcap
+      HINTS
+         "${NPCAP_SDK_LIB_PATH}"
+      REQUIRED)
 
    add_library(
       pcap::pcap
