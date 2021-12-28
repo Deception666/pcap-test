@@ -1581,8 +1581,18 @@ QString FormatICMPPacket(
       stream
          << "-- ICMP Header --\n"
          << "    Type: " << icmp_header->type << "\n"
-         << "    Code: " << icmp_header->code << "\n"
+         << "    Code: " << icmp_header->code << "\n";
+
+      stream.setIntegerBase(16);
+      stream.setNumberFlags(
+         QTextStream::ShowBase |
+         QTextStream::UppercaseDigits |
+         stream.numberFlags());
+
+      stream
          << "Checksum: " << ntohs(icmp_header->checksum) << "\n";
+
+      stream.setIntegerBase(10);
 
       if (icmp_header->type == 0 || icmp_header->type == 8)
       {
@@ -1654,8 +1664,18 @@ QString FormatUDPPacket(
          << "-- UDP Header --\n"
          << "     Source Port: " << ntohs(udp_header->src_port) << "\n"
          << "Destination Port: " << ntohs(udp_header->dst_port) << "\n"
-         << "      Total Size: " << total_udp_size << "\n"
+         << "      Total Size: " << total_udp_size << "\n";
+
+      stream.setIntegerBase(16);
+      stream.setNumberFlags(
+         QTextStream::ShowBase |
+         QTextStream::UppercaseDigits |
+         stream.numberFlags());
+
+      stream
          << "        Checksum: " << ntohs(udp_header->checksum) << "\n";
+
+      stream.setIntegerBase(10);
 
          const auto udp_data_begin =
             reinterpret_cast< const uint8_t * >(
