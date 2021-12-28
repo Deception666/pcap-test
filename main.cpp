@@ -1891,10 +1891,19 @@ int32_t main(
       text_edit.setLineWrapMode(
          QPlainTextEdit::NoWrap);
 
+#if _WIN32
+      QFont font_text_edit {
+         "Consolas",
+         10
+      };
+#elif __linux__
       QFont font_text_edit {
          "FreeMono",
          10
       };
+#else
+#error "Define for this platform!"
+#endif // _WIN32
 
       font_text_edit.setBold(
          true);
