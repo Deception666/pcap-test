@@ -523,18 +523,17 @@ PCAPDevices FindAllDevices( )
          &devices,
          error);
 
-   if (find_result <= PCAP_ERROR || !devices)
+   if (find_result <= PCAP_ERROR)
    {
       std::cerr
          << "Error in pcap_findalldevs: "
          << find_result
          << "\n";
-
-      if (devices)
-      {
-         pcap_freealldevs(
-            devices);
-      }
+   }
+   else if (!devices)
+   {
+      std::cerr
+         << "No capture devices found!\n";
    }
    else
    {
