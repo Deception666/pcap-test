@@ -1,7 +1,11 @@
-// tested under linux mint
-// will need to modify this for windows
-
 #include <pcap/pcap.h>
+
+#if _WIN32
+
+#include <ws2def.h>
+#include <WinSock2.h>
+
+#elif __linux__
 
 #include <arpa/inet.h>
 
@@ -9,41 +13,47 @@
 
 #include <sys/socket.h>
 
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QTreeView>
-#include <QtWidgets/QSplitter>
-#include <QtWidgets/QPlainTextEdit>
-#include <QtWidgets/QMenu>
+#else
+
+#error "Define for this platform!"
+
+#endif // _WIN32
+
 #include <QtWidgets/QAction>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QPlainTextEdit>
+#include <QtWidgets/QSplitter>
+#include <QtWidgets/QTreeView>
 
 #include <QtGui/QFont>
-#include <QtGui/QGuiApplication>
 #include <QtGui/QCursor>
+#include <QtGui/QGuiApplication>
 
-#include <QtCore/QItemSelectionModel>
-#include <QtCore/QItemSelection>
 #include <QtCore/QAbstractItemModel>
-#include <QtCore/QVariant>
-#include <QtCore/QString>
-#include <QtCore/QObject>
-#include <QtCore/QMetaType>
 #include <QtCore/QDebug>
+#include <QtCore/QItemSelection>
+#include <QtCore/QItemSelectionModel>
+#include <QtCore/QMetaType>
+#include <QtCore/QObject>
+#include <QtCore/QString>
 #include <QtCore/QTextStream>
+#include <QtCore/QVariant>
 
 #include <Qt>
 
-#include <cstring>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <memory>
+#include <cstring>
 #include <iostream>
-#include <string>
-#include <vector>
-#include <utility>
 #include <iterator>
-#include <chrono>
+#include <memory>
+#include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 namespace osi
 {
@@ -459,13 +469,12 @@ std::vector< PacketData > CapturePackets(
                CalculateIPHeaderSize(ipv4_header->header_length));
          };
 
-      const auto dispatch_result =
-         pcap_dispatch(
-            capture.get(),
-            -1,
-            packet_handler,
-            reinterpret_cast< uint8_t * >(
-               &packets));
+      pcap_dispatch(
+         capture.get(),
+         -1,
+         packet_handler,
+         reinterpret_cast< uint8_t * >(
+            &packets));
    }
 
    return
@@ -514,12 +523,18 @@ PCAPDevices FindAllDevices( )
          &devices,
          error);
 
-   if (find_result <= PCAP_ERROR)
+   if (find_result <= PCAP_ERROR || !devices)
    {
       std::cerr
          << "Error in pcap_findalldevs: "
          << find_result
          << "\n";
+
+      if (devices)
+      {
+         pcap_freealldevs(
+            devices);
+      }
    }
    else
    {
@@ -900,17 +915,16 @@ public:
       int32_t column,
       const QModelIndex & parent ) const override;
 
+signals:
+   void NewCapturedPackets(
+      const std::shared_ptr< Packets > & packets ) const;
+
 public slots:
    void OnClearCapturedData( );
 
-private:
-signals:
-   void NewCapturedPackets(
-      const std::shared_ptr< Packets > packets ) const;
-
 private slots:
    void OnNewCapturedPackets(
-      const std::shared_ptr< Packets > packets );
+      const std::shared_ptr< Packets > & packets );
 
 private:
    std::vector< PacketData > packets_;
@@ -1063,7 +1077,7 @@ QVariant PCAPItemModel::headerData(
 }
 
 void PCAPItemModel::OnNewCapturedPackets(
-   const std::shared_ptr< Packets > packets )
+   const std::shared_ptr< Packets > & packets )
 {
    if (packets &&
        !packets->empty())
@@ -1091,6 +1105,8 @@ void PCAPItemModel::OnNewCapturedPackets(
 QModelIndex PCAPItemModel::parent(
    const QModelIndex & index ) const
 {
+   std::ignore = index;
+
    return
       QModelIndex { };
 }
@@ -1344,7 +1360,8 @@ void PCAPItemModel::OnClearCapturedData( )
       beginRemoveRows(
          QModelIndex { },
          0,
-         packets_.size() - 1);
+         static_cast< int32_t >(
+            packets_.size() - 1));
 
       packets_.clear();
 
@@ -1797,7 +1814,7 @@ int32_t main(
          device_flags[index];
 
       std::cout
-         << device_flags[index]
+         << device_flag
          << "\n";
 
       const auto & device_address =
@@ -1811,11 +1828,9 @@ int32_t main(
    std::cout
       << "Which device to capture from: ";
    
-   size_t device_index = -1;
+   size_t device_index { ~0u };
 
    std::cin >> device_index;
-
-   int exec_result { };
 
    if (device_index > device_names.size())
    {
@@ -1897,6 +1912,8 @@ int32_t main(
             const QItemSelection & selected,
             const QItemSelection & deselected )
          {
+            std::ignore = deselected;
+
             const auto indexes =
                selected.indexes();
 
@@ -1954,7 +1971,7 @@ int32_t main(
          application.exec();
 
       return
-        exec_result;
+        exec_results;
    }
 }
 

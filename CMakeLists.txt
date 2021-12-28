@@ -1,11 +1,19 @@
-# tested under linux mint
-# will need to modify this for windows
-
 cmake_minimum_required(
    VERSION 3.20.0)
 
 project(
    pcap-test-project)
+
+if (WIN32)
+   set(
+      CMAKE_CONFIGURATION_TYPES
+      Debug
+      Release)
+
+   set(
+      CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS")
+endif ( )
 
 set(
    CMAKE_CXX_STANDARD
@@ -17,7 +25,7 @@ function(
    find_path(
       PCAP_ROOT_DIR
       NAMES
-      pcap/pcap.h)
+         pcap/pcap.h)
 
    if (NOT PCAP_ROOT_DIR)
 
@@ -30,7 +38,7 @@ function(
    find_library(
       PCAP_LIBRARY
       NAMES
-      pcap)
+         pcap)
 
    if (NOT PCAP_LIBRARY)
 
@@ -50,7 +58,25 @@ function(
       pcap::pcap
       PROPERTIES
       IMPORTED_LOCATION ${PCAP_LIBRARY}
-      INTERFACE_INCLUDE_DIRECTORES ${PCAP_ROOT_DIR})
+      INTERFACE_INCLUDE_DIRECTORIES ${PCAP_ROOT_DIR})
+
+   if (WIN32)
+      find_file(
+         PCAP_LOCATION
+         NAMES
+            pcap.dll
+         PATH_SUFFIXES
+            bin)
+   
+      set_target_properties(
+         pcap::pcap
+         PROPERTIES
+         IMPORTED_IMPLIB ${PCAP_LIBRARY}
+         IMPORTED_LOCATION ${PCAP_LOCATION})
+
+      mark_as_advanced(
+         PCAP_LOCATION)
+   endif ( )
 
    mark_as_advanced(
       PCAP_ROOT_DIR
@@ -87,4 +113,5 @@ target_link_libraries(
    Qt5::Core
    Qt5::Gui
    Qt5::Widgets
-   Threads::Threads)
+   Threads::Threads
+   $<IF:${WIN32},ws2_32.lib,>)
