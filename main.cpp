@@ -1880,6 +1880,8 @@ int32_t main(
          std::make_unique< PCAPItemModel >(
             std::move(capture_device),
             &tree_view).release());
+      tree_view.setUniformRowHeights(
+         true);
 
       splitter.addWidget(
          &tree_view);
