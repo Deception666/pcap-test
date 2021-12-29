@@ -12,12 +12,13 @@ if (WIN32)
 
    set(
       CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS")
+      "${CMAKE_CXX_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS 
+      /Zc:__cplusplus")
 endif ( )
 
 set(
    CMAKE_CXX_STANDARD
-   17)
+   20)
 
 function(
    find_pcap )
@@ -84,7 +85,8 @@ endfunction(
    find_pcap )
 
 set(
-   CMAKE_AUTOMOC yes)
+   CMAKE_AUTOMOC
+      yes)
 
 set(
    proj_name

@@ -1,3 +1,5 @@
+// program designed and tested for little-endian byte order machine
+
 #include <pcap/pcap.h>
 
 #if _WIN32
@@ -58,9 +60,11 @@
 namespace osi
 {
 
+// osi layer 2
 namespace data_link
 {
 
+// ethernet packet header
 struct ethernet
 {
    uint8_t dest_mac[6];
@@ -68,6 +72,7 @@ struct ethernet
    uint16_t type;
 };
 
+// vlan ethernet packet header
 struct ethernet_vlan
 {
    uint8_t dest_mac[6];
@@ -79,6 +84,7 @@ struct ethernet_vlan
 
 namespace msb
 {
+// constants in big-endian format describing the ethernet type
 static constexpr uint16_t ETHERNET_TYPE_IPV4 { 0x0008 };
 static constexpr uint16_t ETHERNET_TYPE_IPV6 { 0xDD86 };
 static constexpr uint16_t ETHERNET_TYPE_VLAN { 0x0081 };
@@ -86,9 +92,11 @@ static constexpr uint16_t ETHERNET_TYPE_VLAN { 0x0081 };
 
 } // namespace data_link
 
+// osi layer 3
 namespace network
 {
 
+// ipv4 packet header
 struct ipv4
 {
    // these two are reversed due to bit ordering
@@ -106,27 +114,36 @@ struct ipv4
    uint8_t destination_ip[4];
 };
 
+// types that describe the payload of ipv4 packet
 static constexpr uint8_t PROTOCOL_ICMP { 1 };
 static constexpr uint8_t PROTOCOL_TCP { 6 };
 static constexpr uint8_t PROTOCOL_UDP { 17 };
 
-static constexpr uint16_t FRAGMENT_OFFSET_BITS { 0x1FFF };
-static constexpr uint16_t FRAGMENT_FLAG_BITS { 0xE000 };
+// fragment flags and offset.  the first three bits
+// represent the flags.  the rest represents the offset.
+// these are in host byte order so swap the bytes of the packet.
+static constexpr uint16_t FRAGMENT_OFFSET_MASK { 0x1FFF };
+static constexpr uint16_t FRAGMENT_FLAG_MASK { 0xE000 };
 static constexpr uint16_t FRAGMENT_FLAG_RESERVED { 0x8000 };
 static constexpr uint16_t FRAGMENT_FLAG_DO_NOT_FRAGMENT { 0x4000 };
 static constexpr uint16_t FRAGMENT_FLAG_MORE_FRAGMENTS { 0x2000 };
 
 } // namespace network
 
+// osi layer 4
 namespace transport
 {
 
+// ipv4 packet payload for tcp
 struct tcp
 {
    uint16_t src_port;
    uint16_t dst_port;
    uint32_t sequence;
    uint32_t acknowledgement;
+   // due to bit ordering of big-endian (network order)
+   // to little-endian, the bits are in the right locations
+   // to be used directly from the wire.
    uint8_t reserved1 : 4;
    uint8_t header_length : 4;
    uint8_t terminate_bit : 1;
@@ -143,6 +160,7 @@ struct tcp
    // tcp data follows the options
 };
 
+// ipv4 packet payload for icmp
 struct icmp
 {
    uint8_t type;
@@ -151,6 +169,7 @@ struct icmp
    // next 32-bits is defined by type and code
 };
 
+// ipv4 packet payload for icmp ping request / reply
 struct icmp_echo :
    public icmp
 {
@@ -158,6 +177,7 @@ struct icmp_echo :
    uint16_t sequence;
 };
 
+// ipv4 packet payload for udp
 struct udp
 {
    uint16_t src_port;
@@ -170,6 +190,8 @@ struct udp
 
 } // namespace osi
 
+/// @brief Defines a single packet of data that is setup to point
+/// to the different locations within the packet.
 using PacketData =
    std::tuple<
       double, /* time seconds */
@@ -180,24 +202,29 @@ using PacketData =
       const void * const /* ip payload */
    >;
 
+/// @brief Defines a collection of packets.
 using Packets =
    std::vector< PacketData >;
 
+/// @brief Allows the qt system to recognize packet data
+/// that will be signaled and slotted within the qt system.
 static const auto qt_meta_type_std_vector_PacketData =
    qRegisterMetaType< std::shared_ptr< Packets > >(
       "std::shared_ptr< Packets >");
 
-// the pcap capture handle that will release all
-// the memory created by calling PCAPCloseCapture
+/// @brief The pcap capture handle that automatically
+/// releases the memory once no longer needed.
 using PCAPCapture =
    std::unique_ptr<
       pcap_t,
       void (*) ( pcap_t * const )
    >;
 
-// a utility function to delete the capture handle
-// for a particular device.  this is mainly used by
-// the PCAPCapture handle.
+/// @brief A utility function to release a pcap capture
+/// handle once no longer needed.  This is mainly used
+/// by the PCAPCature handle declaration.
+/// 
+/// @param capture An instance of a pcap capture device.
 void PCAPCloseCapture(
    pcap_t * const capture )
 {
@@ -208,7 +235,13 @@ void PCAPCloseCapture(
    }
 }
 
-// opens a source on the specified interface
+/// @brief Opens a source on the specified interface.
+/// 
+/// @param device_name The interface name to open for
+/// capturing ethernet packets.
+/// 
+/// @return A valid instance to a capture device; otherwise
+/// a nullptr.
 PCAPCapture OpenSource(
    const std::string & device_name )
 {
@@ -250,12 +283,19 @@ PCAPCapture OpenSource(
    };
 }
 
+/// @brief Defines the type of packet associated with
+/// the ethernet packet.
+/// 
+/// @param nbo_type The network byte order representation
+/// of the ethernet type to be identified.
+/// 
+/// @return A string representation of the type.
 std::string IdentifyPacketType(
-   const uint16_t type )
+   const uint16_t nbo_type )
 {
    std::string stype { "Unknown Type" };
 
-   switch (type)
+   switch (nbo_type)
    {
    case osi::data_link::msb::ETHERNET_TYPE_IPV4:
       stype = "IPv4";
@@ -272,6 +312,13 @@ std::string IdentifyPacketType(
       stype;
 }
 
+/// @brief Formats a MAC address into a hexadecimal
+/// dot notation for display.
+/// 
+/// @param mac The MAC address to format.
+/// 
+/// @return A formatted MAC address in hexadecimal
+/// dot notation.
 std::string FormatMediaAccessControl(
    const uint8_t (&mac)[6] )
 {
@@ -299,6 +346,12 @@ std::string FormatMediaAccessControl(
    return smac;
 }
 
+/// @brief Defines the type of payload associated within
+/// an ipv4 packet.
+/// 
+/// @param protocol The ipv4 protocol type to identify.
+/// 
+/// @return A string representation of the protocol.
 std::string IdentifyProtocol(
    const uint8_t protocol )
 {
@@ -321,6 +374,15 @@ std::string IdentifyProtocol(
       sprotocol;
 }
 
+/// @brief Defines the flags that are set within an
+/// ipv4 packet header.
+/// 
+/// @param nbo_fragment_flags_offset The network byte
+/// order of the fragment and flags attribute of the ipv4
+/// packet header.
+/// 
+/// @return A string representation of the flags that are
+/// currently set in the ipv4 packet header.
 std::string InterpretFragmentFlags(
    const uint16_t nbo_fragment_flags_offset )
 {
@@ -329,7 +391,7 @@ std::string InterpretFragmentFlags(
 
    std::string sflags { "None" };
 
-   if (fragment_flags_offset & osi::network::FRAGMENT_FLAG_BITS)
+   if (fragment_flags_offset & osi::network::FRAGMENT_FLAG_MASK)
    {
       sflags.clear();
 
@@ -368,6 +430,13 @@ std::string InterpretFragmentFlags(
       sflags;
 }
 
+/// @brief Calculates the fragment's byte offset.
+/// 
+/// @param nbo_fragment_flags_offset The network byte
+/// order of the fragment and flags attribute of the ipv4
+/// packet header.
+/// 
+/// @return The size in bytes of the fragment's offset.
 uint32_t CalculateFragmentOffset(
    const uint16_t nbo_fragment_flags_offset )
 {
@@ -376,12 +445,19 @@ uint32_t CalculateFragmentOffset(
 
    const uint16_t offset =
       fragment_flags_offset &
-      osi::network::FRAGMENT_OFFSET_BITS;
+      osi::network::FRAGMENT_OFFSET_MASK;
    
    return
       offset * 8;
 }
 
+/// @brief Calculates the ipv4 header's size.  The
+/// header size from the packet represents the number
+/// of 32-bit words that makup the header.
+/// 
+/// @param ip_header_size The number of 32-bit words.
+/// 
+/// @return The header size in bytes.
 size_t CalculateIPHeaderSize(
    const uint8_t ip_header_size )
 {
@@ -389,6 +465,13 @@ size_t CalculateIPHeaderSize(
       ip_header_size * sizeof(uint32_t);
 }
 
+/// @brief Formats an IPv4 address into a string
+/// decimal dot notation.
+/// 
+/// @param address The ipv4 address to format.
+/// 
+/// @return A string decimal dot notation of a ipv4
+/// address.
 std::string FormatIPAddress(
    const uint8_t (&address)[4] )
 {
@@ -415,8 +498,16 @@ std::string FormatIPAddress(
       saddress;
 }
 
-// a utility function to continually capture
-// data from the capture source
+/// @brief A utility function to capture data from the
+/// capture source upto the captured timeout period.
+/// This function can block longer than the configured
+/// timeout and should be offloaded to a thread.
+/// 
+/// @param capture The capture device to read ethernet
+/// packets from.
+/// 
+/// @return A collection of packets that have been
+/// captured in the order they were received.
 std::vector< PacketData > CapturePackets(
    const PCAPCapture & capture )
 {
@@ -425,6 +516,15 @@ std::vector< PacketData > CapturePackets(
 
    if (capture)
    {
+      /// @brief The packet capture callback called when a packet
+      /// is received.
+      /// 
+      /// @param user_data User defined data associated with the callback.
+      /// This data is a vector of packet data that will be returned to the
+      /// calling function.
+      /// @param packet_header Describes the time and size of the packet.
+      /// @param packet_data The captured packet data.  The size of the captured
+      /// data is defined by the configured capture size.
       const auto packet_handler =
          [ ] (
             uint8_t * user_data,
@@ -441,15 +541,24 @@ std::vector< PacketData > CapturePackets(
                std::chrono::duration< double, std::ratio< 1, 1 > > >(
                   std::chrono::microseconds{ packet_header->ts.tv_usec }).count();
 
+            // create a buffer to hold the captured buffer
+#if __cplusplus >= 202002L
+            auto data =
+               std::make_unique_for_overwrite< char [] >(
+                  packet_header->caplen);
+#else
             auto data =
                std::make_unique< char [] >(
                   packet_header->caplen);
+#endif
 
+            // copy the data into the buffer
             std::memcpy(
                data.get(),
                packet_data,
                packet_header->caplen);
 
+            // obtain the locations of the ethernet and ipv4 packets
             const auto ethernet_header =
                reinterpret_cast< const osi::data_link::ethernet * >(
                   data.get());
@@ -457,6 +566,8 @@ std::vector< PacketData > CapturePackets(
                reinterpret_cast< const osi::network::ipv4 * >(
                   ethernet_header + 1);
 
+            // store the data in the packet at the back
+            // the last value stores the ipv4 payload
             packets.emplace_back(
                seconds,
                packet_header->caplen,
@@ -469,6 +580,10 @@ std::vector< PacketData > CapturePackets(
                CalculateIPHeaderSize(ipv4_header->header_length));
          };
 
+      // capture data from the device and store them in
+      // the packet data container.  due to how the timeout
+      // works, this may block longer than the timeout, so
+      // this function should be offloaded to a thread.
       pcap_dispatch(
          capture.get(),
          -1,
@@ -481,16 +596,21 @@ std::vector< PacketData > CapturePackets(
       packets;
 }
 
-// the pcap devices handle that will release all the
-// device memory created by calling FindAllDevices
+/// @brief The pcap devices handle supported by this device
+/// for packet capture.  Once the handle is no longer needed,
+/// the device memory will be released.
 using PCAPDevices =
    std::unique_ptr<
       const pcap_if_t,
       void (*) ( const pcap_if_t * const )
    >;
 
-// a utility function to delete all the pcap devices
-// this is mainly used by the PCAPDevices handle
+/// @brief A utility function to release the memory
+/// allocated by pcap_findalldevs.  This is mainly
+/// used by the PCAPDevices handle.
+/// 
+/// @param devices A pointer to the capture pointer
+/// interface list returned by pcap_findalldevs.
 void PCAPFreeAllDevices(
    const pcap_if_t * const devices )
 {
@@ -502,10 +622,11 @@ void PCAPFreeAllDevices(
    }
 }
 
-// obtains all of the devices that pcap has found
-// and stores them in the pcap devices handle
-// this should really return a vector of device
-// objects that have a shared pointer to devices
+/// @brief Obtains all of the devcies that pcap has
+/// found and stores them in the pcap devices handle.
+/// 
+/// @return A pointer to a list of pcap devices found
+/// for the system; otherwise, a nullptr.
 PCAPDevices FindAllDevices( )
 {
    PCAPDevices all_devices {
@@ -543,9 +664,16 @@ PCAPDevices FindAllDevices( )
       all_devices;
 }
 
-// obtains all of the device names and descriptions
-// for the devices.  the first member is the name
-// of the device.  the second member is the description.
+/// @brief Obtains a vector of interface names and
+/// descriptions associated with the found pcap devices.
+///   
+/// @param devices A pointer to a list of pcap devices found
+/// for the system.
+/// 
+/// @return A vector of name and description pairs.  The first
+/// argument is the device name and the second argument is the
+/// device description.  The order of the pairs is defined the
+/// same as the order of the list of pcap devices.
 std::vector< std::pair< std::string, std::string > >
 GetInterfaceNames(
    const PCAPDevices & devices )
@@ -571,7 +699,15 @@ GetInterfaceNames(
       device_names;
 }
 
-// obtains all of the device flags in human readable format
+/// @brief Obtains all of device flags in human readable format
+/// associated with the found pcap devices.
+/// 
+/// @param devices A pointer to a list of pcap devices found
+/// for the system.
+/// 
+/// @return A vector of flags in human readable format.  The
+/// order of the flags is defined the same as the order of the
+/// list of pcap devices.
 std::vector< std::string >
 GetInterfaceFlags(
    const PCAPDevices & devices )
@@ -642,8 +778,16 @@ GetInterfaceFlags(
       device_flags;
 }
 
-// obtains all of the device addresses in human readable format
-// for the specified socket address family
+/// @brief Obtains all of the device addresses in human
+/// readable format associated with the found interface's
+/// socket address family.  This function decodes the IPv4
+/// and IPv6 socket address families.
+/// 
+/// @param pcap_address An instance of the pcap addresses
+/// associated witha device interface.
+/// 
+/// @return A human readable format of addresses for the device's
+/// interface. 
 std::string AddressToString(
    const pcap_addr_t * const pcap_address )
 {
@@ -780,6 +924,16 @@ std::string AddressToString(
 }
 
 // obtains all of the device addresses in human readable format
+
+/// @brief A utility function to decode the interface addresses
+/// for the found capture devices.
+///   
+/// @param devices A pointer to a list of pcap devices found
+/// for the system.
+/// 
+/// @return A vector of decoded interface addresses.  The order
+/// of the addresses is defined the same as the order of the
+/// list of pcap devices.
 std::vector< std::string >
 GetInterfaceAddresses(
    const PCAPDevices & devices )
@@ -813,11 +967,21 @@ GetInterfaceAddresses(
       device_addresses;
 }
 
+/// @brief A pcap filter associated with a capture
+/// device.  The filter is used to capture certain
+/// packets from the interface.  Once the handle is
+/// no longer needed, it will be released back to
+/// the system.
 using PCAPFilter =
    std::unique_ptr<
       bpf_program,
       void (*) ( bpf_program * const ) >;
 
+/// @brief A utility function to release the resources
+/// associated with a pcap filter.  This is mainly used
+/// by the PCAPFilter handle.
+/// 
+/// @param filter An instnace to a pcap filter.
 void PCAPFreeFilter(
    bpf_program * const filter )
 {
@@ -830,6 +994,15 @@ void PCAPFreeFilter(
    }
 }
 
+/// @brief A utility function to create a filter on a
+/// capture device.  The filter will filter for tcp,
+/// udp, and icmp ip packets.
+/// 
+/// @param capture The capture device to create a filter
+/// for.
+/// 
+/// @return An instance to a newly created filter; otherwise,
+/// a nullptr.
 PCAPFilter CreateAndSetFilter(
    const PCAPCapture & capture )
 {
@@ -883,6 +1056,8 @@ PCAPFilter CreateAndSetFilter(
       filter;
 }
 
+/// @brief A Qt abstract item model that displays
+/// eithernet and ip packet information for a tree view.
 class PCAPItemModel :
    public QAbstractItemModel
 {
@@ -933,6 +1108,11 @@ private:
 
 };
 
+/// @brief Constructor - Constructs a new model for the tree view
+/// and assigns capturing of packets to a thread.
+/// 
+/// @param capture The capture device to capture packets from.
+/// @param parent The parent object that owns this model.
 PCAPItemModel::PCAPItemModel(
    PCAPCapture capture,
    QObject * parent ) :
@@ -940,18 +1120,24 @@ QAbstractItemModel { parent },
 capture_device_ { std::move(capture) },
 quit_capture_ { false }
 {
+   // start a new thread to capture packets on
+   // continue to capture packets until told to quit
    capture_thread_ =
       std::thread {
          [ this ] ( )
          {
             do
             {
+               // capture some packets
                auto packets =
                   CapturePackets(
                      capture_device_);
 
                if (!packets.empty())
                {
+                  // if packets were captured, then
+                  // return them to the model on the
+                  // main thread of the application.
                   emit
                      NewCapturedPackets(
                         std::make_shared< Packets >(
@@ -962,6 +1148,8 @@ quit_capture_ { false }
          }
       };
 
+   // connect the thread to main thread for
+   // when new packets have arrived.
    QObject::connect(
       this,
       &PCAPItemModel::NewCapturedPackets,
@@ -969,12 +1157,17 @@ quit_capture_ { false }
       &PCAPItemModel::OnNewCapturedPackets);
 }
 
+/// @brief Destructor - Releases the resources of the class
+/// and joins the capture thread to the main thread.  This
+/// function will block until thread is joined.
 PCAPItemModel::~PCAPItemModel( )
 {
    if (capture_thread_.joinable())
    {
       quit_capture_ = true;
 
+      // force the loop and dispatch functions to
+      // break from their internal loops.
       pcap_breakloop(
          capture_device_.get());
 
@@ -982,6 +1175,15 @@ PCAPItemModel::~PCAPItemModel( )
    }
 }
 
+/// @brief Returns the number of columns associated
+/// for the parent.  This model assumes only one level
+/// of parents.
+/// 
+/// @param parent The parent level to define the number
+/// of columns.
+/// 
+/// @return Returns the number of columns for the top-level
+/// parent; otherwise, 0.
 int32_t PCAPItemModel::columnCount(
    const QModelIndex & parent ) const
 {
@@ -996,6 +1198,14 @@ int32_t PCAPItemModel::columnCount(
       count;
 }
 
+/// @brief Returns the number of rows associated for the
+/// parent.  This model assumes only one level of parents.
+/// 
+/// @param parent The parent level to define the number of
+/// rows.
+/// 
+/// @return Returns the number of rows for the top-level
+/// parent; otherwise, 0
 int32_t PCAPItemModel::rowCount(
    const QModelIndex & parent ) const
 {
@@ -1012,6 +1222,14 @@ int32_t PCAPItemModel::rowCount(
       count;
 }
 
+/// @brief Obtains the column names.  Columns cannot
+/// be modified.
+/// 
+/// @param section The column location.
+/// @param orientation The orientation of the column data.
+/// @param role The defined role for the columns.
+/// 
+/// @return The column name associated with the section.
 QVariant PCAPItemModel::headerData(
    int32_t section,
    Qt::Orientation orientation,
@@ -1073,6 +1291,12 @@ QVariant PCAPItemModel::headerData(
       header;
 }
 
+/// @brief A slot that defines when new packets have
+/// been captured.  The packets will be sorted in the
+/// order that they have been recieved.
+/// 
+/// @param packets A collection of recieved packets
+/// sorted in the order they were recieved.
 void PCAPItemModel::OnNewCapturedPackets(
    const std::shared_ptr< Packets > & packets )
 {
@@ -1099,6 +1323,13 @@ void PCAPItemModel::OnNewCapturedPackets(
    }
 }
 
+/// @brief Obtains the parent index of the associated
+/// index.  This model assumes just a top-level parent.
+/// 
+/// @param index The index to obtain the parent from.
+/// 
+/// @return The parent index.  This is always the top-level
+/// parent.
 QModelIndex PCAPItemModel::parent(
    const QModelIndex & index ) const
 {
@@ -1108,6 +1339,15 @@ QModelIndex PCAPItemModel::parent(
       QModelIndex { };
 }
 
+/// @brief Obtains the data associated with the specified
+/// index.
+/// 
+/// @param index The location of the data to be obtained.
+/// @param role The defined role for the given index.  This
+/// model will only display data.
+/// 
+/// @return A QString of data to be displayed at the
+/// specified location.
 QVariant PCAPItemModel::data(
    const QModelIndex & index,
    int32_t role ) const
@@ -1329,6 +1569,15 @@ QVariant PCAPItemModel::data(
       value;
 }
 
+/// @brief Returns an index for the row, column, and parent.
+/// This model assume a single top-level parent.
+/// 
+/// @param row The current row of the index.
+/// @param column The current column of the index.
+/// @param parent The parent index for the row and column.
+/// 
+/// @return A model index with row, column, and packet data
+/// for the specified row.
 QModelIndex PCAPItemModel::index(
    int32_t row,
    int32_t column,
@@ -1350,6 +1599,8 @@ QModelIndex PCAPItemModel::index(
       index;
 }
 
+/// @brief A slot that clears all of the currently captured
+/// packets from the model.
 void PCAPItemModel::OnClearCapturedData( )
 {
    if (!packets_.empty())
@@ -1366,6 +1617,13 @@ void PCAPItemModel::OnClearCapturedData( )
    }
 }
 
+/// @brief A utility function that calculates the size
+/// of the TCP header.
+/// 
+/// @param tcp_header_size The tcp header size expressed
+/// as the number of 32-bit words.
+/// 
+/// @return The size in bytes of the TCP header.
 size_t CalculateTCPHeaderSize(
    const uint8_t tcp_header_size )
 {
@@ -1373,6 +1631,13 @@ size_t CalculateTCPHeaderSize(
       tcp_header_size * sizeof(uint32_t);
 }
 
+/// @brief A utility function that formats data into a block
+/// of hexadecimal rows and columns followed by their
+/// ascii representation.
+/// 
+/// @param begin The start of the data block.
+/// @param end The end of the data block (not inclusive)
+/// @param stream The stream to format the data into.
 void FormatDataBlocks(
    const uint8_t * begin,
    const uint8_t * const end,
@@ -1381,6 +1646,7 @@ void FormatDataBlocks(
    const std::ptrdiff_t BYTES_PER_LINE { 16 };
    const std::ptrdiff_t EXTRA_SPACE_AT_BYTES { 8 };
 
+   // save the current state to restore with
    const auto orig_number_flags =
       stream.numberFlags();
    const auto orig_field_width =
@@ -1388,12 +1654,15 @@ void FormatDataBlocks(
    const auto orig_pad_char =
       stream.padChar();
 
+   // pad the bytes with '0' and make uppercase
    stream.setNumberFlags(
       QTextStream::UppercaseDigits);
    stream.setPadChar('0');
 
    while (begin < end)
    {
+      // determine the number of bytes that
+      // the current row will format
       const auto distance =
          end - begin;
       const auto stride =
@@ -1401,10 +1670,13 @@ void FormatDataBlocks(
          BYTES_PER_LINE :
          distance;
 
+      // start off with hexadecimal
       stream.setIntegerBase(16);
 
       for (std::ptrdiff_t i { }; i < stride; ++i)
       {
+         // if we reach the bytes that represent extra
+         // space, add it now.  do not do the first byte.
          if (i && i % EXTRA_SPACE_AT_BYTES == 0)
          {
             stream
@@ -1412,6 +1684,7 @@ void FormatDataBlocks(
                << " ";
          }
 
+         // print the hexadecimal value
          stream
             << qSetFieldWidth(2)
             << *(begin + i)
@@ -1419,8 +1692,14 @@ void FormatDataBlocks(
             << " ";
       }
 
+      // we want to line up the ascii characters
+      // correctly.  this if block checks when the
+      // last line is reached to correctly space the
+      // ascii characters to their starting location.
       if (BYTES_PER_LINE > stride)
       {
+         // each hexadecimal value that is not inserted
+         // into the stream takes up three spaces
          const auto gap =
             BYTES_PER_LINE - stride;
 
@@ -1429,6 +1708,8 @@ void FormatDataBlocks(
             stream << "   ";
          }
 
+         // we determine how many extra spaces due to
+         // block partioning is required.
          const auto extra_spaces =
             gap / EXTRA_SPACE_AT_BYTES;
 
@@ -1438,20 +1719,28 @@ void FormatDataBlocks(
          }
       }
 
+      // move the next part of the line several spaces away
+      // to start the ascii representation that was formatted
       stream << "     ";
 
+      // print the decimal values now
       stream.setIntegerBase(10);
 
       for (std::ptrdiff_t i { }; i < stride; ++i)
       {
+         // if we reach the bytes that represent extra
+         // space, add it now.  do not do the first byte.
          if (i && i % EXTRA_SPACE_AT_BYTES == 0)
          {
             stream << " ";
          }
 
+         // get the current value of the byte
          const auto value =
             *(begin + i);
 
+         // determine if we can visualize the ascii value;
+         // otherwise, just print a . if it cannot.
          if (0 <= value && value <= 31 || value >= 127)
          {
             stream << ".";
@@ -1465,11 +1754,15 @@ void FormatDataBlocks(
          stream << " ";
       }
 
+      // start a new line
       stream << "\n";
 
+      // move the begin pointer the number of
+      // bytes that were just formatted
       begin += stride;
    }
 
+   // restore the stream flags
    stream.setNumberFlags(
       orig_number_flags);
    stream.setFieldWidth(
@@ -1478,6 +1771,14 @@ void FormatDataBlocks(
       orig_pad_char);
 }
 
+/// @brief A utility function to format the TCP packet
+/// and its associated payload.
+/// 
+/// @param packet The packet to format.  This packet is
+/// expected to have a TCP packet for the IP's payload.
+/// 
+/// @return A formatted string of formatted data for a
+/// TCP packet.
 QString FormatTCPPacket(
    const PacketData & packet )
 {
@@ -1578,6 +1879,14 @@ QString FormatTCPPacket(
       spacket;
 }
 
+/// @brief A utility function to format the ICMP packet
+/// and its associated payload.
+/// 
+/// @param packet The packet to format.  This packet is
+/// expected to have a ICMP packet for the IP's payload.
+/// 
+/// @return A formatted string of formatted data for a
+/// ICMP packet.
 QString FormatICMPPacket(
    const PacketData & packet )
 {
@@ -1657,6 +1966,14 @@ QString FormatICMPPacket(
       spacket;
 }
 
+/// @brief A utility function to format the UDP packet
+/// and its associated payload.
+/// 
+/// @param packet The packet to format.  This packet is
+/// expected to have a UPD packet for the IP's payload.
+/// 
+/// @return A formatted string of formatted data for a
+/// UDP packet.
 QString FormatUDPPacket(
    const PacketData & packet )
 {
@@ -1714,6 +2031,14 @@ QString FormatUDPPacket(
       spacket;
 }
 
+/// @brief A utility function to call the associated
+/// format function based on the IPv4's protocol.
+/// 
+/// @param packet The packet to format.
+/// 
+/// @return A formatted string of formatted data for the
+/// specified packet.  If the packet cannot be decoded,
+/// the return value is "Protocol Undefined".
 QString FormatProtocol(
    const PacketData & packet )
 {
@@ -1748,6 +2073,15 @@ QString FormatProtocol(
       protocol;
 }
 
+/// @brief A utility function used to format the packet
+/// based on the incoming index.
+/// 
+/// @param index The index with the associated packet
+/// data.
+/// 
+/// @return A formatted string that represents the packet;
+/// otherwise, an empty string if the index containes no
+/// packet.
 QString FormatSelection(
    const QModelIndex & index )
 {
@@ -1768,10 +2102,19 @@ QString FormatSelection(
       formatted;
 }
 
+/// @brief The main entry point for the application.
+/// 
+/// @param argc The number of arguments associated with
+/// the application.  This is not used by the program.
+/// @param argv An array of argument values associated
+/// with the application.  This is not used by the program.
+/// 
+/// @return 0 on success; otherwise, a error code.
 int32_t main(
    int32_t argc,
    char * argv[] )
 {
+   // find all the devices associated with the system
    const auto all_devices =
       FindAllDevices();
 
@@ -1780,6 +2123,10 @@ int32_t main(
       return -1;
    }
 
+   // obtain attributes about the devices
+   // all of the returned vectors will be
+   // the same in size and indices will be
+   // the same for the devices found.
    const auto device_names =
       GetInterfaceNames(
          all_devices);
@@ -1792,13 +2139,16 @@ int32_t main(
       GetInterfaceAddresses(
          all_devices);
 
+   // print out the information found to the console
    for (const auto & device_name : device_names)
    {
+      // determine the current index within the container
       const auto index =
          std::distance(
             device_names.data(),
             &device_name);
 
+      // print the name and description
       std::cout
          << index
          << ". "
@@ -1807,6 +2157,7 @@ int32_t main(
          << device_name.second
          << "\n";
 
+      // print out the associated flags
       const auto & device_flag =
          device_flags[index];
 
@@ -1814,6 +2165,7 @@ int32_t main(
          << device_flag
          << "\n";
 
+      // print the associated addresses
       const auto & device_address =
          device_addresses[index];
 
@@ -1822,6 +2174,7 @@ int32_t main(
          << "\n\n";
    }
 
+   // ask the user to select a device
    std::cout
       << "Which device to capture from: ";
    
@@ -1831,16 +2184,19 @@ int32_t main(
 
    if (device_index > device_names.size())
    {
+      // they chose poorly
       return -2;
    }
    else
    {
+      // try to open the interface for capture
       auto capture_device =
          OpenSource(
             device_names[device_index].first);
 
       if (!capture_device)
       {
+         // some kind of error happened
          return -3;
       }
 
@@ -1849,6 +2205,7 @@ int32_t main(
          pcap_datalink(
             capture_device.get());
 
+      // we only want to capture eithernet packets
       if (datalink != DLT_EN10MB)
       {
          std::cerr
@@ -1858,6 +2215,7 @@ int32_t main(
          return -4;
       }
 
+      // try to create a filter to capture tcp, udp, and icmp
       const auto filter_code =
          CreateAndSetFilter(
             capture_device);
@@ -1867,25 +2225,41 @@ int32_t main(
          return -5;
       }
 
+      // create a gui application
       QApplication application {
         argc,
         argv
       };
 
+      // we are goingn to split the view into a
+      // tree view on the left and a text display
+      // on the right.
       QSplitter splitter;
 
+      // the three view will hold the incoming packet
+      // and the required eithernet and ipv4 data
       QTreeView tree_view;
 
+      // assign the PCAP model to the tree view
       tree_view.setModel(
          std::make_unique< PCAPItemModel >(
             std::move(capture_device),
             &tree_view).release());
+
+      // use this option to increase the performance
+      // of the tree view.  with this option set, the
+      // tree view can simplify calculations when trying
+      // to scroll or perform mouse presses; otherwise,
+      // it has to ask each row and its associated column
+      // data for their heights.
       tree_view.setUniformRowHeights(
          true);
 
+      // add the tree view first to have it be on the left.
       splitter.addWidget(
          &tree_view);
 
+      // add a text display that does not wrap and cannot edit
       QPlainTextEdit text_edit;
 
       text_edit.setReadOnly(
@@ -1893,6 +2267,7 @@ int32_t main(
       text_edit.setLineWrapMode(
          QPlainTextEdit::NoWrap);
 
+      // set the associated font to be monospaced
 #if _WIN32
       QFont font_text_edit {
          "Consolas",
@@ -1913,6 +2288,10 @@ int32_t main(
       text_edit.setFont(
          font_text_edit);
 
+      // connect the tree view's selection model
+      // to the specified lambda.  when a selection
+      // changes, format the text of the index and
+      // have it be displayed.
       QObject::connect(
          tree_view.selectionModel(),
          &QItemSelectionModel::selectionChanged,
@@ -1925,21 +2304,32 @@ int32_t main(
             const auto indexes =
                selected.indexes();
 
-            if (!indexes.empty())
+            if (indexes.empty())
+            {
+               text_edit.setPlainText(
+                  QString { });
+            }
+            else
             {
                text_edit.setPlainText(
                   FormatSelection(
                      indexes[0]));
-            }          
+            }
          }
       );
 
+      // connect the tree view's button press signal
+      // to the specified lambda.  when the button is
+      // pressed on an item, a context menu will be
+      // presented to allow the user to clear all the
+      // packets from the tree view.
       QObject::connect(
          &tree_view,
          &QTreeView::pressed,
          [ & ] (
             const QModelIndex & index )
          {
+            // only perform this on a right button click
             if (index.isValid() &&
                 QGuiApplication::mouseButtons() & Qt::RightButton)
             {
@@ -1957,6 +2347,8 @@ int32_t main(
 
                   if (model)
                   {
+                     // connect the triggered action to the
+                     // model's clear packets slot.
                      QObject::connect(
                         action,
                         &QAction::triggered,
@@ -1970,11 +2362,14 @@ int32_t main(
             }
          });
 
+      // add the text display to the right
       splitter.addWidget(
          &text_edit);
 
+      // show the splitter to show all items
       splitter.show();
 
+      // allow the main loop to process messages
       const auto exec_results =
          application.exec();
 
