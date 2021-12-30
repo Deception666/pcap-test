@@ -1,5 +1,10 @@
 // program designed and tested for little-endian byte order machine
 
+// note: winpcap redefines inline.  it needs to be commented out.
+// note: while winpcap worked on win10 21H1 (19043.1415), certain
+// aspects of the descriptions were not present as compared to npcap
+// and this functionality may not work in later builds of the os.
+
 #include <pcap/pcap.h>
 
 #if _WIN32
@@ -725,8 +730,15 @@ GetInterfaceFlags(
 
          flags +=
             current_device->flags & PCAP_IF_LOOPBACK ?
-            "Is Loopback\n" :
-            "Is Not Loopback\n";
+            "Is Loopback" :
+            "Is Not Loopback";
+
+// remove these flag checks if winpcap is defined
+// winpcap has not been updated in a long time
+// version checks cannot be done, as npcap has the
+// same version as winpcap.
+#ifndef PCAP_WINPCAP
+         flags += "\n";
 
          flags +=
             current_device->flags & PCAP_IF_UP ?
@@ -768,6 +780,7 @@ GetInterfaceFlags(
                "Connection Status Not Applicable";
             break;
          }
+#endif // PCAP_WINPCAP
 
          device_flags.emplace_back(
             std::move(flags));
