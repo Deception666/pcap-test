@@ -1191,7 +1191,7 @@ int32_t PCAPItemModel::columnCount(
    
    if (!parent.isValid())
    {
-      count = 14;
+      count = 15;
    }
 
    return
@@ -1243,45 +1243,48 @@ QVariant PCAPItemModel::headerData(
       switch (section)
       {
       case 0:
-         header = QString { "Time" };
+         header = QString { "#" };
          break;
       case 1:
-         header = QString { "Length" };
+         header = QString { "Time" };
          break;
       case 2:
-         header = QString { "Ethernet Type" };
+         header = QString { "Length" };
          break;
       case 3:
-         header = QString { "Src MAC" };
+         header = QString { "Ethernet Type" };
          break;
       case 4:
-         header = QString { "Dst MAC" };
+         header = QString { "Src MAC" };
          break;
       case 5:
-         header = QString { "IP Version" };
+         header = QString { "Dst MAC" };
          break;
       case 6:
-         header = QString { "IP Header Size" };
+         header = QString { "IP Version" };
          break;
       case 7:
-         header = QString { "IP Total Length" };
+         header = QString { "IP Header Size" };
          break;
       case 8:
-         header = QString { "IP Frag ID" };
+         header = QString { "IP Total Length" };
          break;
       case 9:
-         header = QString { "IP Frag Flags" };
+         header = QString { "IP Frag ID" };
          break;
       case 10:
-         header = QString { "IP Frag Offset" };
+         header = QString { "IP Frag Flags" };
          break;
       case 11:
-         header = QString { "IP Protocol" };
+         header = QString { "IP Frag Offset" };
          break;
       case 12:
-         header = QString { "IP Src" };
+         header = QString { "IP Protocol" };
          break;
       case 13:
+         header = QString { "IP Src" };
+         break;
+      case 14:
          header = QString { "IP Dst" };
          break;
       }
@@ -1363,18 +1366,24 @@ QVariant PCAPItemModel::data(
       case 0:
          value =
             QString::number(
-               std::get< 0 >(packets_[index.row()]),
-               'f',
-               8);
+               index.row() + 1);
          break;
 
       case 1:
          value =
             QString::number(
-               std::get< 1 >(packets_[index.row()]));
+               std::get< 0 >(packets_[index.row()]),
+               'f',
+               8);
          break;
 
       case 2:
+         value =
+            QString::number(
+               std::get< 1 >(packets_[index.row()]));
+         break;
+
+      case 3:
          {
             const auto ethernet_header =
                std::get< 3 >(packets_[index.row()]);
@@ -1390,7 +1399,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 3:
+      case 4:
          {
             const auto ethernet_header =
                std::get< 3 >(packets_[index.row()]);
@@ -1406,7 +1415,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 4:
+      case 5:
          {
             const auto ethernet_header =
                std::get< 3 >(packets_[index.row()]);
@@ -1422,7 +1431,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 5:
+      case 6:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1437,7 +1446,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 6:
+      case 7:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1453,7 +1462,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 7:
+      case 8:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1468,7 +1477,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 8:
+      case 9:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1483,7 +1492,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 9:
+      case 10:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1499,7 +1508,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 10:
+      case 11:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1515,7 +1524,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 11:
+      case 12:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1531,7 +1540,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 12:
+      case 13:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
@@ -1547,7 +1556,7 @@ QVariant PCAPItemModel::data(
 
          break;
 
-      case 13:
+      case 14:
          {
             const auto ipv4_header =
                std::get< 4 >(packets_[index.row()]);
