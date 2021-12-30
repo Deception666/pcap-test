@@ -114,4 +114,4 @@ target_link_libraries(
    Qt5::Gui
    Qt5::Widgets
    Threads::Threads
-   $<IF:${WIN32},ws2_32.lib,>)
+   $<IF:$<BOOL:${WIN32}>,ws2_32.lib,>)
