@@ -10,22 +10,33 @@ if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       "64-bit platfomrs supported only!")
 endif ( )
 
-
 if (WIN32)
    set(
-      CMAKE_CONFIGURATION_TYPES
-      Debug
-      Release)
-
+      CMAKE_C_FLAGS
+      "${CMAKE_C_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS")
    set(
       CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS 
+      "${CMAKE_CXX_FLAGS} /W4 /permissive- /D_WINSOCK_DEPRECATED_NO_WARNINGS \
       /Zc:__cplusplus")
 endif ( )
 
 set(
    CMAKE_CXX_STANDARD
    20)
+
+function(
+   dynamically_load_pcap )
+
+   message(
+      STATUS
+      "Using internal pcap implementation that will "
+      "dynamically load libpcap on the system.")
+
+   add_subdirectory(
+      pcap-internal)
+
+endfunction(
+   dynamically_load_pcap )
 
 function(
    find_pcap )
@@ -57,8 +68,7 @@ function(
          include
       HINTS
          "${NPCAP_SDK_ROOT}"
-         "${WINPCAP_SDK_ROOT}"
-      REQUIRED)
+         "${WINPCAP_SDK_ROOT}")
 
    find_library(
       PCAP_LIBRARY
@@ -66,8 +76,16 @@ function(
          pcap wpcap
       HINTS
          "${NPCAP_SDK_LIB_PATH}"
-         "${WINPCAP_SDK_LIB_PATH}"
-      REQUIRED)
+         "${WINPCAP_SDK_LIB_PATH}")
+
+   if (NOT PCAP_ROOT_DIR OR
+       NOT PCAP_LIBRARY)
+
+      dynamically_load_pcap()
+
+      return()
+
+   endif ( )
 
    add_library(
       pcap::pcap
@@ -96,9 +114,6 @@ function(
          IMPORTED_IMPLIB ${PCAP_LIBRARY}
          IMPORTED_LOCATION ${PCAP_LOCATION})
 
-      mark_as_advanced(
-         PCAP_LOCATION)
-
       if (NPCAP_SDK_ROOT)
          set(
             pcap_compile_definitions
@@ -117,18 +132,15 @@ function(
          pcap::pcap
          PROPERTIES
          INTERFACE_COMPILE_DEFINITIONS ${pcap_compile_definitions})
-   endif ( )
 
-   mark_as_advanced(
-      PCAP_ROOT_DIR
-      PCAP_LIBRARY)
+   endif ( )
 
 endfunction(
    find_pcap )
 
 set(
    CMAKE_AUTOMOC
-      yes)
+   yes)
 
 set(
    proj_name
@@ -140,20 +152,66 @@ add_executable(
 
 find_pcap()
 find_package(
-   Qt5
+   Threads)
+
+find_package(
+   Qt6
+   QUIET
    COMPONENTS
    Core
    Gui
    Widgets)
-find_package(
-   Threads)
+
+if (NOT Qt6_FOUND)
+   find_package(
+      Qt5 5.15
+      QUIET
+      COMPONENTS
+      Core
+      Gui
+      Widgets)
+endif ( )
+
+if (Qt6_FOUND OR Qt5_FOUND)
+   target_link_libraries(
+      ${proj_name}
+      PRIVATE
+      Qt::Core
+      Qt::Gui
+      Qt::Widgets)
+else ( )
+   message(
+      FATAL_ERROR
+      "Qt 5.15 or greater or Qt 6 required!")
+endif ( )
 
 target_link_libraries(
    ${proj_name}
    PRIVATE
    pcap::pcap
-   Qt5::Core
-   Qt5::Gui
-   Qt5::Widgets
    Threads::Threads
    $<IF:$<BOOL:${WIN32}>,ws2_32.lib,>)
+
+get_target_property(
+   pcap_target
+   pcap::pcap
+   ALIASED_TARGET)
+
+string(
+   CONCAT
+   pcap_runtime_output_directory
+   "$<IF:"
+      "$<IN_LIST:"
+         "pcap_internal_AS_SHARED_LIB,"
+         "$<TARGET_PROPERTY:"
+            "pcap::pcap,"
+            "INTERFACE_COMPILE_DEFINITIONS"
+         ">"
+      ">,"
+      "$<TARGET_FILE_DIR:${proj_name}>,"
+   ">")
+
+set_target_properties(
+   ${pcap_target}
+   PROPERTIES
+   RUNTIME_OUTPUT_DIRECTORY ${pcap_runtime_output_directory})

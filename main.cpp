@@ -9,8 +9,10 @@
 
 #if _WIN32
 
-#include <ws2def.h>
+#define WIN32_LEAN_AND_MEAN
 #include <WinSock2.h>
+#include <ws2ipdef.h>
+#include <ws2tcpip.h>
 
 #elif __linux__
 
@@ -26,13 +28,20 @@
 
 #endif // _WIN32
 
+#include <Qt>
+
+#if QT_VERSION < 0x00060000
 #include <QtWidgets/QAction>
+#endif // QT_VERSION >= 0x00060000
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QTreeView>
 
+#if QT_VERSION >= 0x00060000
+#include <QtGui/QAction>
+#endif // QT_VERSION >= 0x00060000
 #include <QtGui/QFont>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
@@ -46,8 +55,6 @@
 #include <QtCore/QString>
 #include <QtCore/QTextStream>
 #include <QtCore/QVariant>
-
-#include <Qt>
 
 #include <chrono>
 #include <cstdint>
